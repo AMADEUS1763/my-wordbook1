@@ -22,6 +22,7 @@ class CSATVocabApp {
 
     // Active view
     this.activeView = "dashboard";
+    this.selectedDaybookDay = 1;
 
     this.init();
   }
@@ -169,6 +170,8 @@ class CSATVocabApp {
       this.renderWordbook();
     } else if (viewName === "incorrect") {
       this.renderIncorrectNotes();
+    } else if (viewName === "daybook") {
+      this.renderDaybook();
     } else if (viewName === "flashcards") {
       if (this.currentDeck.length === 0) {
         this.initFlashcardDeck("all");
@@ -206,6 +209,7 @@ class CSATVocabApp {
     // Render Dashboard Day Grid
     this.renderDashboardDayGrid();
     this.populateFlashcardDayOptions();
+    this.populateWordbookDayOptions();
   }
 
   renderDashboardDayGrid() {
@@ -223,6 +227,11 @@ class CSATVocabApp {
         <div class="day-card" onclick="app.startFlashcards('day_${dayNum}')">
           <div class="day-title">Day ${dayNum < 10 ? '0' + dayNum : dayNum}</div>
           <div class="day-count">${learnedCount} / ${dayWords.length} 학습 완료</div>
+          <div class="day-card-actions">
+            <button class="day-action-btn" onclick="event.stopPropagation(); app.showDayInWordbook(${dayNum});" title="단어장에서 보기">
+              <i class="fa-solid fa-book-bookmark"></i> 단어장 보기
+            </button>
+          </div>
         </div>
       `;
     }).join("");
@@ -245,6 +254,152 @@ class CSATVocabApp {
     if (select && currentValue) {
       select.value = currentValue;
     }
+  }
+
+  populateWordbookDayOptions() {
+    const select = document.getElementById("wordbook-day-filter");
+    if (!select) return;
+
+    const currentValue = select.value;
+    const days = [...new Set(CSAT_WORDS.map(w => w.day).filter(Boolean))].sort((a, b) => a - b);
+
+    let html = '<option value="all">전체 Day</option>';
+    html += days.map(dayNum => {
+      return `<option value="day_${dayNum}">Day ${dayNum < 10 ? '0' + dayNum : dayNum}</option>`;
+    }).join("");
+
+    select.innerHTML = html;
+
+    if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+      select.value = currentValue;
+    }
+  }
+
+  showDayInWordbook(dayNum) {
+    this.selectedDaybookDay = dayNum;
+    this.switchView("daybook");
+  }
+
+  renderDaybook() {
+    const dayListContainer = document.getElementById("daybook-day-list");
+    const wordGridContainer = document.getElementById("daybook-word-grid");
+    if (!dayListContainer || !wordGridContainer) return;
+
+    // 1. Render Left Sidebar Day List
+    const days = [...new Set(CSAT_WORDS.map(w => w.day).filter(Boolean))].sort((a, b) => a - b);
+    dayListContainer.innerHTML = days.map(d => {
+      const dayWords = CSAT_WORDS.filter(w => w.day === d);
+      const learnedCount = dayWords.filter(w => this.state.knownWords.includes(w.id)).length;
+      const isActive = d === this.selectedDaybookDay;
+      
+      return `
+        <button class="daybook-sidebar-btn ${isActive ? 'active' : ''}" onclick="app.selectDaybookDay(${d})">
+          <span>Day ${d < 10 ? '0' + d : d}</span>
+          <span class="daybook-sidebar-count">${learnedCount}/${dayWords.length}</span>
+        </button>
+      `;
+    }).join("");
+
+    // Scroll active element into view if needed
+    const activeBtn = dayListContainer.querySelector(".daybook-sidebar-btn.active");
+    if (activeBtn) {
+      activeBtn.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+
+    // 2. Render Right Content Word Grid
+    const selectedDayNum = this.selectedDaybookDay;
+    const dayWords = CSAT_WORDS.filter(w => w.day === selectedDayNum);
+
+    // Update headers
+    document.getElementById("daybook-selected-title").innerText = `Day ${selectedDayNum < 10 ? '0' + selectedDayNum : selectedDayNum} 단어장`;
+    document.getElementById("daybook-selected-desc").innerText = `Day ${selectedDayNum < 10 ? '0' + selectedDayNum : selectedDayNum} 필수 어휘 ${dayWords.length}단어입니다.`;
+
+    if (dayWords.length === 0) {
+      wordGridContainer.innerHTML = `
+        <div class="empty-state" style="grid-column: 1/-1;">
+          <div class="empty-icon"><i class="fa-solid fa-folder-open"></i></div>
+          <p>해당 Day에 단어가 없습니다.</p>
+        </div>
+      `;
+      return;
+    }
+
+    wordGridContainer.innerHTML = dayWords.map(w => {
+      const isStarred = this.state.starredWords.includes(w.id);
+      const isKnown = this.state.knownWords.includes(w.id);
+
+      let metaHtml = "";
+      if (w.synonyms && w.synonyms.length > 0) {
+        metaHtml += `<div class="meta-row" style="margin-top:0.4rem;"><span class="meta-label syn">유의어</span> ${w.synonyms.map(s => `<span class="meta-pill">${s}</span>`).join('')}</div>`;
+      }
+      if (w.antonyms && w.antonyms.length > 0) {
+        metaHtml += `<div class="meta-row" style="margin-top:0.3rem;"><span class="meta-label ant">반의어</span> ${w.antonyms.map(a => `<span class="meta-pill">${a}</span>`).join('')}</div>`;
+      }
+      if (w.irregular) {
+        metaHtml += `<div class="meta-row" style="margin-top:0.3rem;"><span class="meta-label inflect"><i class="fa-solid fa-triangle-exclamation"></i> 변형 주의</span> <span class="meta-pill-inflect">${w.irregular}</span></div>`;
+      }
+
+      return `
+        <div class="word-card">
+          <div>
+            <div class="word-card-header">
+              <div>
+                <span class="word-card-title">${w.word}</span>
+                <span class="word-card-pos">${w.pos || ''}</span>
+              </div>
+              <button class="star-btn ${isStarred ? 'active' : ''}" onclick="app.toggleStarWord('${w.id}')">
+                <i class="${isStarred ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+              </button>
+            </div>
+            <div class="word-card-meaning">${this.formatMeaning(w.meaning)}</div>
+            ${metaHtml}
+            ${w.example ? `
+              <div class="word-card-example" style="margin-top:0.5rem;">
+                <div>${w.example}</div>
+                <div style="color: var(--text-dim); font-size: 0.8rem; margin-top: 0.2rem;">${w.translation || ''}</div>
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="word-card-footer">
+            <button class="audio-btn" style="width: 32px; height: 32px; font-size: 0.85rem;" onclick="app.speakWord('${w.word}')">
+              <i class="fa-solid fa-volume-high"></i>
+            </button>
+            
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <span style="font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 4px; ${isKnown ? 'background: rgba(16,185,129,0.2); color:#34d399;' : 'background: rgba(255,255,255,0.05); color:var(--text-dim);'}">
+                ${isKnown ? '학습완료' : '미학습'}
+              </span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  selectDaybookDay(dayNum) {
+    this.selectedDaybookDay = dayNum;
+    this.renderDaybook();
+  }
+
+  startDaybookQuiz() {
+    this.switchView("quiz");
+    const catSelect = document.getElementById("quiz-cat-select");
+    if (catSelect) {
+      let dayOpt = catSelect.querySelector(`option[value="day_${this.selectedDaybookDay}"]`);
+      if (!dayOpt) {
+        dayOpt = document.createElement("option");
+        dayOpt.value = `day_${this.selectedDaybookDay}`;
+        dayOpt.innerText = `📅 Day ${this.selectedDaybookDay < 10 ? '0' + this.selectedDaybookDay : this.selectedDaybookDay}`;
+        catSelect.appendChild(dayOpt);
+      }
+      catSelect.value = `day_${this.selectedDaybookDay}`;
+    }
+    this.startQuiz();
+  }
+
+  startDaybookFlashcards() {
+    this.startFlashcards(`day_${this.selectedDaybookDay}`);
   }
 
   startFlashcards(category) {
@@ -457,6 +612,7 @@ class CSATVocabApp {
     this.saveState();
     this.renderWordbook();
     this.renderIncorrectNotes();
+    this.renderDaybook();
   }
 
   speakCurrentWord() {
@@ -488,6 +644,9 @@ class CSATVocabApp {
       candidates = [...this.words];
     } else if (cat === "incorrect") {
       candidates = this.words.filter(w => this.state.wrongWords.includes(w.id));
+    } else if (cat.startsWith("day_")) {
+      const dayNum = parseInt(cat.replace("day_", ""), 10);
+      candidates = this.words.filter(w => w.day === dayNum);
     } else {
       candidates = this.words.filter(w => w.category === cat);
     }
@@ -657,12 +816,19 @@ class CSATVocabApp {
     this.words = [...CSAT_WORDS, ...this.state.customWords];
     const searchTerm = (document.getElementById("word-search-input")?.value || "").toLowerCase().trim();
     const catFilter = document.getElementById("wordbook-category-filter")?.value || "all";
+    const dayFilter = document.getElementById("wordbook-day-filter")?.value || "all";
 
     let filtered = this.words.filter(w => {
       // Category match
       if (catFilter === "starred" && !this.state.starredWords.includes(w.id)) return false;
       if (catFilter === "custom" && !w.id.startsWith("custom_")) return false;
       if (catFilter !== "all" && catFilter !== "starred" && catFilter !== "custom" && w.category !== catFilter) return false;
+
+      // Day match
+      if (dayFilter !== "all") {
+        const targetDay = parseInt(dayFilter.replace("day_", ""), 10);
+        if (w.day !== targetDay) return false;
+      }
 
       // Search match
       if (searchTerm) {
